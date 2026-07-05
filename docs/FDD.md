@@ -92,9 +92,11 @@ Resposta `201 Created` (secret devolvida uma única vez, na criação):
 }
 ```
 
-Erros possíveis: `400 WEBHOOK_INVALID_URL` (URL não é HTTPS), `400 WEBHOOK_EVENT_TYPES_EMPTY`, `404 CUSTOMER_NOT_FOUND` (reuso do padrão de erro de recurso não encontrado já usado em outros módulos).
+Erros possíveis: `400 WEBHOOK_INVALID_URL` (URL não é HTTPS), `400 WEBHOOK_EVENT_TYPES_EMPTY`, `404 NOT_FOUND` (reuso direto de `new NotFoundError('Customer')` — gera o código genérico `NOT_FOUND`, não um código específico `CUSTOMER_NOT_FOUND`, já que a validação do cliente não foi um ponto discutido na reunião e não há necessidade de um código dedicado para este caso).
 
 ### 2. `GET /api/v1/webhooks?customerId=...` — listar webhooks de um cliente
+
+Requisição: sem corpo — filtros via query string, ex.: `GET /api/v1/webhooks?customerId=8f14e45f-ceea-467e-b76a-9daf6a3ee453&page=1&pageSize=20`.
 
 Resposta `200 OK` (envelope de paginação padrão de `src/shared/http/response.ts`):
 ```json
@@ -137,9 +139,13 @@ Erros possíveis: `404 WEBHOOK_NOT_FOUND`, `400 WEBHOOK_INVALID_URL`.
 
 ### 4. `DELETE /api/v1/webhooks/:id` — remover endpoint
 
+Requisição: sem corpo — `DELETE /api/v1/webhooks/3fa85f64-5717-4562-b3fc-2c963f66afa6`.
+
 Resposta: `204 No Content`. Erros possíveis: `404 WEBHOOK_NOT_FOUND`.
 
 ### 5. `POST /api/v1/webhooks/:id/rotate-secret` — rotacionar secret
+
+Requisição: sem corpo — `POST /api/v1/webhooks/3fa85f64-5717-4562-b3fc-2c963f66afa6/rotate-secret`.
 
 Resposta `200 OK`:
 ```json
@@ -152,6 +158,8 @@ Resposta `200 OK`:
 Semântica: a secret anterior permanece válida por 24 horas em paralelo à nova ([09:21] Sofia). Erros possíveis: `404 WEBHOOK_NOT_FOUND`.
 
 ### 6. `GET /api/v1/webhooks/:id/deliveries` — histórico de entregas
+
+Requisição: sem corpo — `GET /api/v1/webhooks/3fa85f64-5717-4562-b3fc-2c963f66afa6/deliveries?page=1&pageSize=100`.
 
 Resposta `200 OK` (últimas 100 entregas, [09:34] Marcos):
 ```json
@@ -181,7 +189,7 @@ Erros possíveis: `404 WEBHOOK_NOT_FOUND`.
 
 ### 7. `POST /api/v1/admin/webhooks/dead-letter/:id/replay` — reprocessar evento morto (role `ADMIN`)
 
-Requer `authenticate` + `requireRole('ADMIN')` ([09:35]-[09:36] Larissa/Sofia). Resposta `202 Accepted`:
+Requisição: sem corpo — `POST /api/v1/admin/webhooks/dead-letter/d1e2f3a4-b5c6-7d8e-9f0a-1b2c3d4e5f6a/replay`, exige `authenticate` + `requireRole('ADMIN')` ([09:35]-[09:36] Larissa/Sofia). Resposta `202 Accepted`:
 ```json
 {
   "outboxId": "9c8b7a6f-5e4d-3c2b-1a0f-9e8d7c6b5a4f",
@@ -205,7 +213,9 @@ Erros possíveis: `404 WEBHOOK_DEAD_LETTER_NOT_FOUND`, `403 FORBIDDEN` (role dif
 | `WEBHOOK_SECRET_ROTATION_ALREADY_IN_PROGRESS` | 409 | Nova rotação solicitada enquanto a `previousSecret` do ciclo anterior ainda está no grace period de 24h |
 | `WEBHOOK_INACTIVE_ENDPOINT` | 409 | Tentativa de rotacionar secret ou consultar deliveries de um endpoint com `active: false` |
 
-Todos herdam de `AppError` (`src/shared/errors/app-error.ts`) e das subclasses HTTP genéricas já existentes (`ConflictError`, `NotFoundError`, `UnprocessableEntityError`, `BadRequestError` — `src/shared/errors/http-errors.ts`), seguindo o padrão de `InsufficientStockError`/`InvalidStatusTransitionError`. Nenhuma mudança é necessária em `src/middlewares/error.middleware.ts`.
+A maioria herda diretamente de `ConflictError`, `UnprocessableEntityError` ou `BadRequestError` (`src/shared/errors/http-errors.ts`), que já aceitam um código de erro customizado via parâmetro, seguindo exatamente o padrão de `InsufficientStockError`/`InvalidStatusTransitionError` (que estendem essas classes, não `AppError` diretamente).
+
+**Exceção a registrar:** `WEBHOOK_NOT_FOUND` e `WEBHOOK_DEAD_LETTER_NOT_FOUND` não podem reaproveitar `NotFoundError` como está — diferente de `ConflictError`/`UnprocessableEntityError`, a classe `NotFoundError` hoje fixa o código em `'NOT_FOUND'` (`constructor(resource = 'Resource') { super(\`${resource} not found\`, 404, 'NOT_FOUND'); }`, `src/shared/errors/http-errors.ts:27-31`) e não aceita um código customizado. Para emitir os códigos específicos exigidos pela matriz acima, o módulo de webhooks precisa de uma nova classe (`WebhookNotFoundError`, `WebhookDeadLetterNotFoundError`) estendendo `AppError` diretamente com `statusCode: 404` e o código específico — o mesmo princípio de `InvalidStatusTransitionError`, só que a partir de `AppError` em vez de `NotFoundError`. Isso é uma classe nova dentro do próprio módulo novo (`src/modules/webhooks/`), não uma alteração em `src/shared/errors/http-errors.ts` nem em `NotFoundError` em si — e nenhuma mudança é necessária em `src/middlewares/error.middleware.ts`, que já serializa qualquer `AppError` pelo `errorCode`/`statusCode` que ela carregar.
 
 ## Estratégias de resiliência
 
@@ -250,7 +260,7 @@ Todos herdam de `AppError` (`src/shared/errors/app-error.ts`) e das subclasses H
 ## Integração com o sistema existente
 
 - **`src/modules/orders/order.service.ts`** (método `changeStatus`): estendido para, dentro da mesma `this.prisma.$transaction(async (tx) => {...})` já existente, chamar `publishWebhookEvent(tx, order, fromStatus, toStatus)` após a validação de transição e antes do commit — reaproveitando o mesmo `tx: Prisma.TransactionClient` já usado para `tx.order.update` e `tx.orderStatusHistory.create`.
-- **`src/shared/errors/app-error.ts` e `src/shared/errors/http-errors.ts`**: todas as novas classes de erro do módulo de webhooks (`WebhookNotFoundError`, etc.) estendem `AppError` ou as subclasses HTTP genéricas já existentes (`ConflictError`, `NotFoundError`, `UnprocessableEntityError`), no mesmo padrão de `InsufficientStockError`/`InvalidStatusTransitionError`.
+- **`src/shared/errors/app-error.ts` e `src/shared/errors/http-errors.ts`**: as novas classes de erro do módulo de webhooks estendem `ConflictError`/`UnprocessableEntityError`/`BadRequestError` quando o código precisa ser customizado (mesmo padrão de `InsufficientStockError`/`InvalidStatusTransitionError`); `WebhookNotFoundError` e `WebhookDeadLetterNotFoundError` são exceção e estendem `AppError` diretamente, já que `NotFoundError` não aceita código customizado (ver [Matriz de erros](#matriz-de-erros-previstos-prefixo-webhook_)). Nenhum arquivo existente em `src/shared/errors/` precisa ser modificado.
 - **`src/middlewares/error.middleware.ts`**: nenhuma alteração de código é necessária — por herdarem de `AppError`, os erros `WEBHOOK_*` já são serializados corretamente pelo handler centralizado existente (`{ error: { code, message, details } }`).
 - **`src/middlewares/auth.middleware.ts`**: `authenticate` protege todas as rotas de `src/modules/webhooks/webhook.routes.ts`; `requireRole('ADMIN')` protege especificamente `POST /admin/webhooks/dead-letter/:id/replay`, seguindo o mesmo padrão hoje aplicado em `src/modules/users/user.routes.ts` (`GET /:id`).
 - **`src/shared/logger/index.ts`**: `webhook.service.ts` e `webhook.worker.ts` importam a instância singleton `logger` já configurada (redaction, formato JSON em produção), sem criar uma nova instância de Pino.
