@@ -1,6 +1,6 @@
 # Sistema de Webhooks de Notificação de Pedidos — Design Docs
 
-> O enunciado original do desafio ("Da Reunião ao Documento: Design Docs Gerados por IA") está preservado em [documentacao/solicitacao.md](../desafio%204-daReuniaoAdocumentacao/documentacao/solicitacao.md) do repositório de trabalho, e a especificação completa dos critérios de aceite pode ser consultada no repositório base do desafio: https://github.com/devfullcycle/mba-ia-desafio-design-docs-com-ia. Este README documenta o **processo de produção** desta entrega, não o enunciado em si.
+> O enunciado original do desafio ("Da Reunião ao Documento: Design Docs Gerados por IA") não faz parte deste repositório — a especificação completa dos critérios de aceite pode ser consultada no repositório base do desafio: https://github.com/devfullcycle/mba-ia-desafio-design-docs-com-ia. Este README documenta o **processo de produção** desta entrega, não o enunciado em si.
 
 ## Sobre o desafio
 
