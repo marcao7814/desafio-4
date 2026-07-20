@@ -9,3 +9,7 @@ coverage/
 .idea/
 .vscode/
 *.tsbuildinfo
+
+# ../documentacao/ (pasta irmã, fora desta árvore de trabalho) nunca é
+# rastreada por este repositório — mantida aqui só como registro dessa
+# decisão, já que .gitignore não alcança caminhos fora de repo/.
